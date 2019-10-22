@@ -16,6 +16,7 @@ SSD1306 oled;
 MAX30102 sensor;
 Pulse pulseIR;
 Pulse pulseRed;
+MAFilter bpm;
 
 #define LED 1
 
@@ -31,20 +32,6 @@ const uint8_t spo2_table[184] PROGMEM =
           49, 48, 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 31, 30, 29, 
           28, 27, 26, 25, 23, 22, 21, 20, 19, 17, 16, 15, 14, 12, 11, 10, 9, 7, 6, 5, 
           3, 2, 1 } ;
-
-const byte RATE_SIZE = 8; //Increase this for more averaging. 4 is good.
-uint16_t MA_rate = 60 * RATE_SIZE;     // Moving Average Total
-long lastBeat = 0; //Time at which the last beat occurred
-long beatsPerMinute;
-int  beatAvg;
-long RX100;
-int  SPO2, SPO2f;
-int  voltage;
-
-const uint8_t MAXWAVE = 80;
-uint8_t waveform[MAXWAVE];
-uint8_t disp_wave[MAXWAVE];
-uint8_t wavep = 0;
 
 
 int getVCC() {
@@ -62,36 +49,65 @@ void print_digit(int x, int y, long val, char c=' ', uint8_t field = 3,
     } while (ff>0);
 }
 
-void scale_wave() {
-  uint8_t maxw = 0;
-  uint8_t minw = 255;
-  for (int i=0; i<MAXWAVE; i++) { 
-    maxw = waveform[i]>maxw?waveform[i]:maxw;
-    minw = waveform[i]<minw?waveform[i]:minw;
-  }
-  uint8_t scale = (maxw-minw)/32 + 1;
-  uint8_t index = wavep;
-  uint8_t nexty = 31-(waveform[index]-minw)/scale;
-  for (int i=0; i<MAXWAVE; i++) {
-    disp_wave[i] = 31-(waveform[index]-minw)/scale;
-    index = (index + 1) % MAXWAVE;
-  }
-}
 
-void draw_wave() {
-   for (int i=0; i<MAXWAVE; i++) {
-    uint8_t y = disp_wave[i];
-    oled.drawPixel(i, y);
-    if (i<MAXWAVE-1) {
-      uint8_t nexty = disp_wave[i+1];
-      if (nexty>y) {
-        for (uint8_t iy = y+1; iy<nexty; ++iy)  oled.drawPixel(i, iy);
-      } else if (nexty<y) {
-        for (uint8_t iy = nexty+1; iy<y; ++iy)  oled.drawPixel(i, iy);
+/*
+ *   Record, scale  and display PPG Wavefoem
+ */
+const uint8_t MAXWAVE = 80;
+
+class Waveform {
+  public:
+    Waveform(void) {wavep = 0;}
+
+      void record(int waveval) {
+        waveval = waveval/8;         // scale to fit in byte
+        waveval += 128;              //shift so entired waveform is +ve
+        waveval = waveval<0? 0 : waveval;
+        waveform[wavep] = (uint8_t) (waveval>255)?255:waveval; 
+        wavep = (wavep+1) % MAXWAVE;
       }
+  
+      void scale() {
+        uint8_t maxw = 0;
+        uint8_t minw = 255;
+        for (int i=0; i<MAXWAVE; i++) { 
+          maxw = waveform[i]>maxw?waveform[i]:maxw;
+          minw = waveform[i]<minw?waveform[i]:minw;
+        }
+        uint8_t scale = (maxw-minw)/32 + 1;
+        uint8_t index = wavep;
+        uint8_t nexty = 31-(waveform[index]-minw)/scale;
+        for (int i=0; i<MAXWAVE; i++) {
+          disp_wave[i] = 31-(waveform[index]-minw)/scale;
+          index = (index + 1) % MAXWAVE;
+        }
+      }
+
+      void draw() {
+       for (int i=0; i<MAXWAVE; i++) {
+        uint8_t y = disp_wave[i];
+        oled.drawPixel(i, y);
+        if (i<MAXWAVE-1) {
+          uint8_t nexty = disp_wave[i+1];
+          if (nexty>y) {
+            for (uint8_t iy = y+1; iy<nexty; ++iy)  oled.drawPixel(i, iy);
+          } else if (nexty<y) {
+            for (uint8_t iy = nexty+1; iy<y; ++iy)  oled.drawPixel(i, iy);
+          }
+        }
+      }  
     }
-  }  
-}
+
+private:
+    uint8_t waveform[MAXWAVE];
+    uint8_t disp_wave[MAXWAVE];
+    uint8_t wavep = 0;
+    
+} wave;
+
+int  beatAvg;
+int  SPO2, SPO2f;
+int  voltage;
 
 void draw_oled(int msg) {
     oled.firstPage();
@@ -106,7 +122,7 @@ void draw_oled(int msg) {
                  oled.drawChar(118,0,'V');
                  break;
         case 2:  print_digit(86,0,beatAvg);
-                 draw_wave();
+                 wave.draw();
                  print_digit(98,16,SPO2f,' ',3,1);
                  oled.drawChar(116,16,'%');
                  print_digit(98,24,SPO2,' ',3,1);
@@ -133,65 +149,59 @@ void setup(void) {
   sensor.setup(); 
 }
 
-
-const int SPERIOD = 1;
-long displaytime = 0;
+long lastBeat = 0;    //Time of the last beat 
+long displaytime = 0; //Time of the last display update
 bool led_on = false;
+bool fingerdown = false;
 
 void loop()  {
-    uint32_t irValue = 0;
-    uint32_t redValue = 0;
     sensor.check();
-    long now = millis();   //start of this cycle
+    long now = millis();   //start time of this cycle
     if (sensor.available()) {
-      irValue = sensor.getIR(); 
-      redValue = sensor.getRed();
+      uint32_t irValue = sensor.getIR(); 
+      uint32_t redValue = sensor.getRed();
       sensor.nextSample();
-      if (irValue < 7000) {
-          voltage =getVCC();
+      // finger down not detected display message
+      fingerdown = (irValue >= 7000);
+      if (!fingerdown) {
+          voltage = getVCC();
           draw_oled(1); 
           delay(100);
           return;
       } 
+      // remove DC element
       int16_t IR_signal = pulseIR.dc_filter(irValue);
       int16_t Red_signal = pulseRed.dc_filter(redValue);
-      // record IR in waveform array
-      int waveval = -IR_signal/8; // invert wabveform to get classical BP waveshape
-      waveval += 128;              //shift so entired waveform is +ve
-      waveval = waveval<0? 0 : waveval;
-      waveform[wavep] = (uint8_t) (waveval>255)?255:waveval; 
-      wavep = (wavep+1) % MAXWAVE;
-      // display beat if detected
-      pulseRed.isBeat(pulseRed.ma_filter(Red_signal));
+      // invert waveform to get classical BP waveshape
+      wave.record(-IR_signal); 
+      // check IR for heartbeat, Red is needed to compute avgRed
+      pulseRed.isBeat(pulseRed.ma_filter(Red_signal)); 
       if (pulseIR.isBeat(pulseIR.ma_filter(IR_signal))){
-          long thisbeat = now;
-          beatsPerMinute = 60000/(thisbeat - lastBeat);
-          lastBeat = thisbeat; 
-          if (beatsPerMinute < 200 && beatsPerMinute > 20){ 
-            MA_rate += beatsPerMinute - MA_rate/RATE_SIZE;
-            beatAvg =  MA_rate/RATE_SIZE;
-          }
+          long btpm = 60000/(now - lastBeat);
+          if (btpm > 0 && btpm < 200) beatAvg = bpm.filter((int16_t)btpm);
+          lastBeat = now; 
           digitalWrite(LED, HIGH); 
           led_on = true;
-          // computed SpO2 ratio
+          // compute SpO2 ratio
           long numerator   = (pulseRed.avgAC() * pulseIR.avgDC())/256;
           long denominator = (pulseRed.avgDC() * pulseIR.avgAC())/256;
-          if (denominator>0) 
-                RX100 = (numerator * 100)/denominator;
-          else
-                RX100 = 999;
-          SPO2f = (10400 - RX100*17+50)/100;  //round up
+          int RX100 = (denominator>0) ? (numerator * 100)/denominator : 999;
+          // using formula
+          SPO2f = (10400 - RX100*17+50)/100;  
+          // from table
           if ((RX100>=0) && (RX100<184))
                 SPO2 = pgm_read_byte_near(&spo2_table[RX100]);
       }
     }
+    // flash led for 25 ms
     if (led_on && (now - lastBeat)>25){
         digitalWrite(LED, LOW);
         led_on = false;
     }
-    if ((now-displaytime>50) && irValue>=7000) {
+    // update display every 50 ms if fingerdown
+    if ((now-displaytime>50) && fingerdown) {
         displaytime = now;
-        scale_wave();
+        wave.scale();
         draw_oled(2);
     }
 }
