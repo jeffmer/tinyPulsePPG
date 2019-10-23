@@ -5,11 +5,11 @@ This project implemented on an ATTiny85 displays a moving Photoplethysmogram tog
 ### Hardware
 The system was implemented on a prototyping board as shown below:
 
-![image](image/first.jpg)
+![Image](Image/first.jpg)
 
 The circuit diagram is:
 
-![image](image/circuit.jpeg)
+![image](Image/circuit.jpeg)
 
 The ATTiny85 is configured to run at 16 MHz using Spence Konde's ATTinyCore. Consequently, according to the datasheet, the supply voltage should be >4.5V. In fact, it seems to run quite happily from a lipo battery (3.7 - 4.2V).
 
@@ -17,11 +17,11 @@ The ATTiny85 is configured to run at 16 MHz using Spence Konde's ATTinyCore. Con
 
 After a few seconds the following screen is displayed:
 
-![image](image/place_finger.jpg)
+![image](Image/place_finger.jpg)
 
 When a finger is placed on the sensor, the PPG, heart-rate and two estimates of blood oxygen are displayed (discussed below)  are displayed:
 
-![image](image/finger1.jpg) ..........  ![image](image/finger2.jpg)
+![image](Image/finger1.jpg) ..........  ![image](Image/finger2.jpg)
 
 The red led pulses once per heart beat. The PPG display is updated every 50ms.
 
