@@ -19,7 +19,7 @@ After a few seconds the following screen is displayed:
 
 ![image](Image/place_finger.jpg)
 
-When a finger is placed on the sensor, the PPG, heart-rate and two estimates of blood oxygen are displayed (discussed below)  are displayed:
+When a finger is placed on the sensor, the PPG, heart-rate and two estimates of blood oxygen are displayed (discussed below):
 
 ![image](Image/finger1.jpg) ..........  ![image](Image/finger2.jpg)
 
