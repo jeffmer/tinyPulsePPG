@@ -45,7 +45,10 @@ The lower uses a table from the Maxim Arduino driver which is an approximation o
 
 The AC is computed in **tinyPulsePPG** as the peak to peak amplitude of the signal after the DC element has been removed.  the DC element is computed by an exponential moving average filter and the AC is also filtered. I have not experimented enough with the constants in these filters to determine the effect on the SpO2 calculation or indeed how reliable this method is of computing these quantities.
 
-**PPG display** The read and IR signals from the sensor go through two stages of filtering. The first as described above is removal of the DC element. The second is a moving average filter which acts as a low pass filter to remove transients before the signal is input to the beat detector. I have chosen to display the signal after the first filtering phase so that it retains more interesting features. For example, dicrotic notches can be seen in the pictures above - *"a secondary upstroke in the descending part of a pulse tracing corresponding to the transient increase in aortic pressure upon closure of the aortic valve. - Merriam Webster Dictionary"*
+**PPG display** The read and IR signals from the sensor go through two stages of filtering. The first as described above is removal of the DC element. The second is a moving average filter which acts as a low pass filter to remove transients before the signal is input to the beat detector. I have chosen to display the signal after the first filtering phase so that it retains more interesting features. 
+
+For example, dicrotic notches can be seen in the pictures above - *"a secondary upstroke in the descending part of a pulse tracing corresponding to the transient increase in aortic pressure upon closure of the aortic valve. - Merriam Webster Dictionary"*
+
 I have noticed that if this dicrotic notch is particularly strong - younger individuals - it can overcome the second stage filtering and cause erroneous output from the beat detector which essentially looks for peaks and valleys in the wave. On going work!
 
 
