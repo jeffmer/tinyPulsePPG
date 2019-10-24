@@ -21,16 +21,18 @@ bool Pulse::isBeat(int16_t signal) {
   if (positive && (signal > prev_sig)) cycle_max = signal;  
   //while negative slope record minimum
   if (!positive && (signal < prev_sig)) cycle_min = signal;
-  //  positive to negative i.e peak
-  if (positive && (signal < prev_sig)) {cycle_min = 0; positive = false;} 
-  //negative to positive i.e valley bottom so declare beat
-  if (!positive && (signal > prev_sig)) {
+  //  positive to negative i.e peak so declare beat
+  if (positive && (signal < prev_sig)) {
     int amplitude = cycle_max - cycle_min;
-    if (amplitude > 20 && amplitude < 2000) {
+    if (amplitude > 20 && amplitude < 3000) {
       beat = true;
       amplitude_avg_total += (amplitude - amplitude_avg_total/4); 
     }
-    cycle_max= 0; positive = true;
+    cycle_min = 0; positive = false;
+  } 
+  //negative to positive i.e valley bottom 
+  if (!positive && (signal > prev_sig)) {
+     cycle_max= 0; positive = true;
   } 
   prev_sig = signal; // save signal
   return beat;
