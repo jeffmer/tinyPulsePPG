@@ -5,12 +5,22 @@
 * j.n.magee 15-10-2019
 */
 
-
-#include <avr/sleep.h>
 #include "ssd1306h.h"
 #include "MAX30102.h"
 #include "Pulse.h"
 #include <avr/pgmspace.h>
+#include <EEPROM.h>
+#include <avr/sleep.h>
+#include <avr/wdt.h>
+
+// Routines to clear and set bits 
+#ifndef cbi
+#define cbi(sfr, bit) (_SFR_BYTE(sfr) &= ~_BV(bit))
+#endif
+#ifndef sbi
+#define sbi(sfr, bit) (_SFR_BYTE(sfr) |= _BV(bit))
+#endif
+
 
 SSD1306 oled; 
 MAX30102 sensor;
@@ -19,6 +29,8 @@ Pulse pulseRed;
 MAFilter bpm;
 
 #define LED 1
+#define BUTTON 3
+#define OPTIONS 7
 
 static const uint8_t heart_bits[] PROGMEM = { 0x00, 0x00, 0x38, 0x38, 0x7c, 0x7c, 0xfe, 0xfe, 0xfe, 0xff, 
                                         0xfe, 0xff, 0xfc, 0x7f, 0xf8, 0x3f, 0xf0, 0x1f, 0xe0, 0x0f,
@@ -79,11 +91,10 @@ class Waveform {
           maxw = waveform[i]>maxw?waveform[i]:maxw;
           minw = waveform[i]<minw?waveform[i]:minw;
         }
-        uint8_t scale = (maxw-minw)/32 + 1;
+        uint8_t scale8 = (maxw-minw)/4 + 1;  //scale * 8 to preserve precision
         uint8_t index = wavep;
-        uint8_t nexty = 31-(waveform[index]-minw)/scale;
         for (int i=0; i<MAXWAVE; i++) {
-          disp_wave[i] = 31-(waveform[index]-minw)/scale;
+          disp_wave[i] = 31-((uint16_t)(waveform[index]-minw)*8)/scale8;
           index = (index + 1) % MAXWAVE;
         }
       }
@@ -113,6 +124,44 @@ private:
 int  beatAvg;
 int  SPO2, SPO2f;
 int  voltage;
+bool filter_for_graph = false;
+bool draw_Red = false;
+uint8_t pcflag =0;
+uint8_t istate = 0;
+uint8_t sleep_counter = 0;
+
+ISR(PCINT0_vect){
+    pcflag = 1;
+}
+
+void checkbutton(){
+    if (pcflag && !digitalRead(BUTTON)) {
+      istate = (istate +1) % 4;
+      filter_for_graph = istate & 0x01;
+      draw_Red = istate & 0x02;
+      EEPROM.write(OPTIONS, filter_for_graph);
+      EEPROM.write(OPTIONS+1, draw_Red);
+    }
+    pcflag = 0;
+}
+
+void go_sleep() {
+    oled.fill(0);
+    oled.off();
+    delay(10);
+    sensor.off();
+    delay(10);
+    cbi(ADCSRA, ADEN);  // disable adc
+    delay(10);
+    pinMode(0,INPUT);
+    pinMode(2,INPUT);
+    set_sleep_mode(SLEEP_MODE_PWR_DOWN);     
+    sleep_mode();  // sleep until button press 
+    // cause reset
+    wdt_enable(WDTO_15MS);
+    wdt_reset();
+    while(1);
+}
 
 void draw_oled(int msg) {
     oled.firstPage();
@@ -120,11 +169,21 @@ void draw_oled(int msg) {
     switch(msg){
         case 0:  oled.drawStr(10,0,F("Device error"),1); 
                  break;
-        case 1:  oled.drawStr(10,12,F("Place Finger"),1); 
+        case 1:  oled.drawStr(13,10,F("PLACE"),1); 
+                 oled.drawStr(10,20,F("FINGER"),1);
                  oled.drawChar(100,0,voltage/10+'0');
                  oled.drawChar(106,0,'.');
                  oled.drawChar(112,0,voltage%10+'0');
                  oled.drawChar(118,0,'V');
+                 oled.drawStr(84,14,F("Display"),1); 
+                 if (draw_Red) 
+                    oled.drawStr(84,24,F("Red"),1); 
+                 else
+                    oled.drawStr(84,24,F("IR"),1); 
+                 if (filter_for_graph) 
+                    oled.drawStr(108,24,F("Avg"),1); 
+                 else
+                    oled.drawStr(108,24,F("Raw"),1); 
                  break;
         case 2:  print_digit(86,0,beatAvg);
                  wave.draw(8);
@@ -137,27 +196,39 @@ void draw_oled(int msg) {
                  oled.drawXBMP(6,8,16,16,heart_bits);
                  oled.drawXBMP(106,8,16,16,heart_bits);
                  break;
-
+        case 4:  oled.drawStr(28,12,F("OFF IN"),1);
+                 oled.drawChar(76,12,10-sleep_counter/10+'0');
+                 oled.drawChar(82,12,'s');
+                 break;
         }
     } while (oled.nextPage());
 }
 
 void setup(void) {
+  MCUSR = 0;
+  wdt_disable();
   pinMode(LED, OUTPUT);
+  pinMode(BUTTON, INPUT_PULLUP);
+  filter_for_graph = EEPROM.read(OPTIONS);
+  draw_Red = EEPROM.read(OPTIONS+1);
   oled.init();
   oled.fill(0x00);
   draw_oled(3);
-  delay(3000);
+  delay(3000); 
   if (!sensor.begin())  {
     draw_oled(0);
     while (1);
   }
   sensor.setup(); 
+  sbi(GIMSK, PCIE); // set up pin change interrupt
+  sbi(PCMSK, PCINT3);
+  sei();
 }
 
 long lastBeat = 0;    //Time of the last beat 
 long displaytime = 0; //Time of the last display update
 bool led_on = false;
+
 
 void loop()  {
     sensor.check();
@@ -166,19 +237,36 @@ void loop()  {
     uint32_t irValue = sensor.getIR(); 
     uint32_t redValue = sensor.getRed();
     sensor.nextSample();
-    if (irValue<7000) {
+    if (irValue<5000) {
         voltage = getVCC();
-        draw_oled(1); // finger not down message
+        checkbutton();
+        draw_oled(sleep_counter<=70 ? 1 : 4); // finger not down message
         delay(100);
+        ++sleep_counter;
+        if (sleep_counter>100) {
+          go_sleep(); 
+          sleep_counter = 0;
+        }
     } else {
+        sleep_counter = 0;
         // remove DC element
-        int16_t IR_signal = pulseIR.dc_filter(irValue);
-        int16_t Red_signal = pulseRed.dc_filter(redValue);
+        int16_t IR_signal, Red_signal;
+        bool beatRed, beatIR;
+        if (!filter_for_graph) {
+           IR_signal =  pulseIR.dc_filter(irValue) ;
+           Red_signal = pulseRed.dc_filter(redValue);
+           beatRed = pulseRed.isBeat(pulseRed.ma_filter(Red_signal));
+           beatIR =  pulseIR.isBeat(pulseIR.ma_filter(IR_signal));        
+        } else {
+           IR_signal =  pulseIR.ma_filter(pulseIR.dc_filter(irValue)) ;
+           Red_signal = pulseRed.ma_filter(pulseRed.dc_filter(redValue));
+           beatRed = pulseRed.isBeat(Red_signal);
+           beatIR =  pulseIR.isBeat(IR_signal);
+        }
         // invert waveform to get classical BP waveshape
-        wave.record(-IR_signal); 
-        // check IR for heartbeat, Red is needed to compute avgRed
-        pulseRed.isBeat(pulseRed.ma_filter(Red_signal)); 
-        if (pulseIR.isBeat(pulseIR.ma_filter(IR_signal))){
+        wave.record(draw_Red ? -Red_signal : -IR_signal ); 
+        // check IR or Red for heartbeat     
+        if (draw_Red ? beatRed : beatIR){
             long btpm = 60000/(now - lastBeat);
             if (btpm > 0 && btpm < 200) beatAvg = bpm.filter((int16_t)btpm);
             lastBeat = now; 
@@ -194,11 +282,6 @@ void loop()  {
             if ((RX100>=0) && (RX100<184))
               SPO2 = pgm_read_byte_near(&spo2_table[RX100]);
         }
-        // flash led for 25 ms
-        if (led_on && (now - lastBeat)>25){
-            digitalWrite(LED, LOW);
-            led_on = false;
-        }
         // update display every 50 ms if fingerdown
         if (now-displaytime>50) {
             displaytime = now;
@@ -206,4 +289,9 @@ void loop()  {
             draw_oled(2);
         }
     }
+    // flash led for 25 ms
+    if (led_on && (now - lastBeat)>25){
+        digitalWrite(LED, LOW);
+        led_on = false;
+     }
 }
