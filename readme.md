@@ -27,6 +27,16 @@ The red led pulses once per heart beat. The PPG display is updated every 50ms.
 
 ### Software
 
+**Needed library**
+In order to build this to the ATTiny85 you need to install the library ATTinyCore
+This core can be installed using the boards manager. The boards manager URL is:
+
+http://drazzy.com/package_drazzy.com_index.json
+
+File->Preferences on a PC, or Arduino->Preferences on a Mac, enter the above URL in "Additional Boards Manager URLs
+Tools -> Boards -> Boards Manager... *If using 1.6.6, close boards manager and re-open it (see below)
+Select "ATTinyCore by Spence Konde" and click "Install".
+
 **Driver issue -** The Maxim max30102 sensor used is mounted on a MH-ET LIVE breakout board. The Maxim datasheet for the max30102 implies but does not state explicitly that LED1 is Red and LED2 is Infrared (IR), however, if the amplitude of LED1 is set to zero, the red led (as depicted in the *place finger*) picture remains lit, while if LED2 is set to zero, the red led is extinguished. The obvious conclusion is that LED1 is IR and LED2 is Red (i.e. swapped) which also works when computing blood oxygen - see below. I mention this as the most common driver used in Arduino projects for the max30102 is the Sparkfun 3010x driver which clearly identifies LED1 with Red and LED2 with IR. This may be true for the max30105 device mounted on the Sparkfun board but does not seem to apply to the max30102 on the MH-ET-LIVE board. 
 
 **Spo2 calculation** *"SpO2 stands for peripheral capillary oxygen saturation, an estimate of the amount of oxygen in the blood. More specifically, it is the percentage of oxygenated haemoglobin (haemoglobin containing oxygen) compared to the total amount of haemoglobin in the blood (oxygenated and non-oxygenated haemoglobin)."* 

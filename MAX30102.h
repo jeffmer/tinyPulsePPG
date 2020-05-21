@@ -4,6 +4,8 @@
 *
 * j.n.magee 15-10-2019
 */
+#ifndef MAX30102_H
+#define MAX30102_H
 #include <arduino.h>
 
 #define MAX30105_ADDRESS 0x57 
@@ -68,3 +70,4 @@ class MAX30102{
     } sense; //Circular buffer of readings from the sensor
 
 };
+#endif
